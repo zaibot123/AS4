@@ -1,0 +1,581 @@
+{
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "view-in-github",
+        "colab_type": "text"
+      },
+      "source": [
+        "<a href=\"https://colab.research.google.com/github/zaibot123/AS4/blob/master/Video%20Style%20Transfer\" target=\"_parent\"><img src=\"https://colab.research.google.com/assets/colab-badge.svg\" alt=\"Open In Colab\"/></a>"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "mHSYUjA_iX-N"
+      },
+      "source": [
+        "This is a companion notebook for the book [Deep Learning with Python, Second Edition](https://www.manning.com/books/deep-learning-with-python-second-edition?a_aid=keras&a_bid=76564dff). For readability, it only contains runnable code blocks and section titles, and omits everything else in the book: text paragraphs, figures, and pseudocode.\n",
+        "\n",
+        "**If you want to be able to follow what's going on, I recommend reading the notebook side by side with your copy of the book.**\n",
+        "\n",
+        "This notebook was generated for TensorFlow 2.6."
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "mm7Tu42RiX-V"
+      },
+      "source": [
+        "## Neural style transfer"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "rk4WRI6yiX-W"
+      },
+      "source": [
+        "### The content loss"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "TLbM6tGTiX-Y"
+      },
+      "source": [
+        "### The style loss"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "tygMA9PLiX-Z"
+      },
+      "source": [
+        "### Neural style transfer in Keras"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "rATLVV72iX-a"
+      },
+      "source": [
+        "**Getting the style and content images**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 165,
+      "metadata": {
+        "id": "OLTKowVqiX-g"
+      },
+      "outputs": [],
+      "source": [
+        "\n",
+        "from tensorflow import keras\n",
+        "\n",
+        "base_image_path = keras.utils.get_file(\n",
+        "    \"sf.jpg\", origin=\"https://img-datasets.s3.amazonaws.com/sf.jpg\")\n",
+        "style_reference_image_path1 = keras.utils.get_file(\n",
+        "    \"starry_night.jpg\", origin=\"https://img-datasets.s3.amazonaws.com/starry_night.jpg\")\n",
+        "\n",
+        "original_width, original_height = keras.utils.load_img(base_image_path).size\n",
+        "img_height = 400\n",
+        "img_width = round(original_width * img_height / original_height)"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import cv2\n",
+        "import os\n",
+        "\n",
+        "def reset_folder(folder_path):\n",
+        "    if os.path.exists(folder_path):\n",
+        "        # Delete the folder and its contents\n",
+        "        for item in os.listdir(folder_path):\n",
+        "            item_path = os.path.join(folder_path, item)\n",
+        "            if os.path.isdir(item_path):\n",
+        "                # Recursively delete subfolders and files\n",
+        "                reset_folder(item_path)\n",
+        "            else:\n",
+        "                os.remove(item_path)\n",
+        "        os.rmdir(folder_path)\n",
+        "\n",
+        "    # Recreate the folder\n",
+        "    os.makedirs(folder_path)\n",
+        "\n",
+        "def video_to_frames(mp4_path, frame_folder):\n",
+        "    reset_folder(frame_folder)\n",
+        "    vidcap = cv2.VideoCapture(mp4_path)\n",
+        "    success, image = vidcap.read()\n",
+        "    count = 0\n",
+        "\n",
+        "    while success:\n",
+        "        frame_path = os.path.join(frame_folder, f\"frame{count:04d}.jpg\")  # Save frame with zero-padded numbers\n",
+        "        cv2.imwrite(frame_path, image)\n",
+        "        success, image = vidcap.read()\n",
+        "        print('Read a new frame: ', success)\n",
+        "        count += 1\n",
+        "\n",
+        "    # Sort the frames in the folder\n",
+        "    frame_files = sorted([f for f in os.listdir(frame_folder) if f.endswith('.jpg')])\n",
+        "\n",
+        "    for i, frame_file in enumerate(frame_files):\n",
+        "        new_frame_path = os.path.join(frame_folder, f\"frame{i:04d}.jpg\")  # Rename the frames\n",
+        "        os.rename(os.path.join(frame_folder, frame_file), new_frame_path)\n",
+        "\n",
+        "\n",
+        "def frames_to_video(frame_folder, output_video_path, frame_rate):\n",
+        "    frame_files = [f for f in os.listdir(frame_folder) if f.endswith('.jpg')]\n",
+        "    frame_files.sort(key=lambda x: int(x[5:-4]))  # Sort the frames in the correct order\n",
+        "\n",
+        "    frame = cv2.imread(os.path.join(frame_folder, frame_files[0]))\n",
+        "    height, width, layers = frame.shape\n",
+        "\n",
+        "    fourcc = cv2.VideoWriter_fourcc(*'mp4v')\n",
+        "    out = cv2.VideoWriter(output_video_path, fourcc, frame_rate, (width, height))\n",
+        "\n",
+        "    for frame_file in frame_files:\n",
+        "        frame_path = os.path.join(frame_folder, frame_file)\n",
+        "        frame = cv2.imread(frame_path)\n",
+        "        out.write(frame)\n",
+        "\n",
+        "    out.release()\n",
+        "\n"
+      ],
+      "metadata": {
+        "id": "hlfkTBAHaqds"
+      },
+      "execution_count": 166,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "koYibqo7iX-s"
+      },
+      "source": [
+        "**Auxiliary functions**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 167,
+      "metadata": {
+        "id": "O6jlGH3LiX-x"
+      },
+      "outputs": [],
+      "source": [
+        "import numpy as np\n",
+        "\n",
+        "def preprocess_image(image_path):\n",
+        "    img = keras.utils.load_img(\n",
+        "        image_path, target_size=(img_height, img_width))\n",
+        "    img = keras.utils.img_to_array(img)\n",
+        "    img = np.expand_dims(img, axis=0)\n",
+        "    img = keras.applications.vgg19.preprocess_input(img)\n",
+        "    return img\n",
+        "\n",
+        "def deprocess_image(img):\n",
+        "    img = img.reshape((img_height, img_width, 3))\n",
+        "    img[:, :, 0] += 103.939\n",
+        "    img[:, :, 1] += 116.779\n",
+        "    img[:, :, 2] += 123.68\n",
+        "    img = img[:, :, ::-1]\n",
+        "    img = np.clip(img, 0, 255).astype(\"uint8\")\n",
+        "    return img"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "itYu0JvciX-y"
+      },
+      "source": [
+        "**Using a pretrained VGG19 model to create a feature extractor**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 168,
+      "metadata": {
+        "id": "o7IDtw17iX-4"
+      },
+      "outputs": [],
+      "source": [
+        "model = keras.applications.vgg19.VGG19(weights=\"imagenet\", include_top=False)\n",
+        "\n",
+        "outputs_dict = dict([(layer.name, layer.output) for layer in model.layers])\n",
+        "feature_extractor = keras.Model(inputs=model.inputs, outputs=outputs_dict)"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "79G7QMSniX-6"
+      },
+      "source": [
+        "**Content loss**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 169,
+      "metadata": {
+        "id": "bxJT7ZhdiX-7"
+      },
+      "outputs": [],
+      "source": [
+        "def content_loss(base_img, combination_img):\n",
+        "    return tf.reduce_sum(tf.square(combination_img - base_img))"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "hQCasIXUiX-8"
+      },
+      "source": [
+        "**Style loss**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 170,
+      "metadata": {
+        "id": "I038VotyiX-9"
+      },
+      "outputs": [],
+      "source": [
+        "def gram_matrix(x):\n",
+        "    x = tf.transpose(x, (2, 0, 1))\n",
+        "    features = tf.reshape(x, (tf.shape(x)[0], -1))\n",
+        "    gram = tf.matmul(features, tf.transpose(features))\n",
+        "    return gram\n",
+        "\n",
+        "def style_loss(style_img, combination_img):\n",
+        "    S = gram_matrix(style_img)\n",
+        "    C = gram_matrix(combination_img)\n",
+        "    channels = 3\n",
+        "    size = img_height * img_width\n",
+        "    return tf.reduce_sum(tf.square(S - C)) / (4.0 * (channels ** 2) * (size ** 2))"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "2mlFFZTIiX--"
+      },
+      "source": [
+        "**Total variation loss**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 171,
+      "metadata": {
+        "id": "qzZoqxmFiX--"
+      },
+      "outputs": [],
+      "source": [
+        "def total_variation_loss(x):\n",
+        "    a = tf.square(\n",
+        "        x[:, : img_height - 1, : img_width - 1, :] - x[:, 1:, : img_width - 1, :]\n",
+        "    )\n",
+        "    b = tf.square(\n",
+        "        x[:, : img_height - 1, : img_width - 1, :] - x[:, : img_height - 1, 1:, :]\n",
+        "    )\n",
+        "    return tf.reduce_sum(tf.pow(a + b, 1.25))"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "1uUKTsKeiX_P"
+      },
+      "source": [
+        "**Defining the final loss that you'll minimize**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 172,
+      "metadata": {
+        "id": "R8NLIaVwiX_R"
+      },
+      "outputs": [],
+      "source": [
+        "style_layer_names = [\n",
+        "    \"block1_conv1\",\n",
+        "    \"block2_conv1\",\n",
+        "    \"block3_conv1\",\n",
+        "    \"block4_conv1\",\n",
+        "    \"block5_conv1\",\n",
+        "]\n",
+        "content_layer_name = \"block5_conv2\"\n",
+        "total_variation_weight = 1e-6\n",
+        "style_weight = 1e-6\n",
+        "content_weight = 2.5e-8\n",
+        "\n",
+        "def compute_loss(combination_image, base_image, style_reference_image):\n",
+        "    input_tensor = tf.concat(\n",
+        "        [base_image, style_reference_image, combination_image], axis=0\n",
+        "    )\n",
+        "    features = feature_extractor(input_tensor)\n",
+        "    loss = tf.zeros(shape=())\n",
+        "    layer_features = features[content_layer_name]\n",
+        "    base_image_features = layer_features[0, :, :, :]\n",
+        "    combination_features = layer_features[2, :, :, :]\n",
+        "    loss = loss + content_weight * content_loss(\n",
+        "        base_image_features, combination_features\n",
+        "    )\n",
+        "    for layer_name in style_layer_names:\n",
+        "        layer_features = features[layer_name]\n",
+        "        style_reference_features = layer_features[1, :, :, :]\n",
+        "        combination_features = layer_features[2, :, :, :]\n",
+        "        style_loss_value = style_loss(\n",
+        "          style_reference_features, combination_features)\n",
+        "        loss += (style_weight / len(style_layer_names)) * style_loss_value\n",
+        "\n",
+        "    loss += total_variation_weight * total_variation_loss(combination_image)\n",
+        "    return loss"
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "mvW9_itziX_T"
+      },
+      "source": [
+        "**Setting up the gradient-descent process**"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 173,
+      "metadata": {
+        "id": "gkB8itP1iX_Y"
+      },
+      "outputs": [],
+      "source": [
+        "import tensorflow as tf\n",
+        "import keras as keras\n",
+        "import os\n",
+        "from keras.optimizers import SGD\n",
+        "from google.colab import files  # Import the files module\n",
+        "\n",
+        "# Define a custom loss function that computes the total variation loss\n",
+        "@tf.function\n",
+        "def compute_loss_and_grads(combination_image, base_image, style_reference_image):\n",
+        "    with tf.GradientTape() as tape:\n",
+        "        loss = compute_loss(combination_image, base_image, style_reference_image)\n",
+        "    grads = tape.gradient(loss, combination_image)\n",
+        "    return loss, grads\n",
+        "\n",
+        "optimizer = tf.keras.optimizers.legacy.SGD(learning_rate=0.5)\n",
+        "\n",
+        "def process_frames(original_frames_folder, processed_frames_folder):\n",
+        "    # Specify the directory containing your images\n",
+        "    reset_folder(processed_frames_folder)\n",
+        "\n",
+        "    # List all files in the directory\n",
+        "    file_list = os.listdir(original_frames_folder)\n",
+        "\n",
+        "    # Filter for image files (e.g., JPEG or PNG)\n",
+        "    file_list.sort()\n",
+        "\n",
+        "    for i, frame in enumerate(file_list[:5]):\n",
+        "        print(frame)\n",
+        "        base_image = preprocess_image(os.path.join(original_frames_folder, frame))\n",
+        "        style_reference_image = preprocess_image(style_reference_image_path1)\n",
+        "        combination_image = tf.Variable(preprocess_image(os.path.join(original_frames_folder, frame)))\n",
+        "        iterations = 3\n",
+        "        for j in range(1, iterations + 1):\n",
+        "            loss, grads = compute_loss_and_grads(\n",
+        "                combination_image, base_image, style_reference_image\n",
+        "            )\n",
+        "            optimizer.apply_gradients([(grads, combination_image)])\n",
+        "            if j % 1 == 0:\n",
+        "                print(f\"Iteration {j}: loss={loss:.2f}\")\n",
+        "                img = deprocess_image(combination_image.numpy())\n",
+        "                fname = os.path.join(processed_frames_folder, f\"ProcessedFrame-{i+1:04d}.png\")\n",
+        "                cv2.imwrite(fname, img)  # Save the processed frame with a formatted filename\n",
+        "                print(f\"Saving {fname} to {processed_frames_folder}\")\n"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "import os\n",
+        "import cv2\n",
+        "\n",
+        "def frames_to_video(frame_folder, output_video_path, frame_rate):\n",
+        "    frame_files = [f for f in os.listdir(frame_folder) if f.endswith('.png')]\n",
+        "    frame_files.sort(key=lambda x: int(x.split('-')[-1][:-4]))  # Sort the frames based on the numeric part\n",
+        "\n",
+        "    frame = cv2.imread(os.path.join(frame_folder, frame_files[0]))\n",
+        "    height, width, layers = frame.shape\n",
+        "\n",
+        "    fourcc = cv2.VideoWriter_fourcc(*'mp4v')\n",
+        "    out = cv2.VideoWriter(output_video_path, fourcc, frame_rate, (width, height))\n",
+        "\n",
+        "    for frame_file in frame_files:\n",
+        "        frame_path = os.path.join(frame_folder, frame_file)\n",
+        "        frame = cv2.imread(frame_path)\n",
+        "        out.write(frame)\n",
+        "\n",
+        "    out.release()\n",
+        "\n",
+        "# Example usage:\n",
+        "frame_folder = '/content/ProcessedFrames'\n",
+        "output_video_path = '/content/output.mp4'\n",
+        "frame_rate = 2\n",
+        "frames_to_video(frame_folder, output_video_path, frame_rate)\n"
+      ],
+      "metadata": {
+        "id": "3J1PJrHZqA7h"
+      },
+      "execution_count": 174,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "#MAIN\n",
+        "\n",
+        "\n",
+        "#Extracting frames\n",
+        "#input_video= \"/content/SampleVideo_360x240_1mb.mp4\"\n",
+        "#original_frame_folder = '/content/Frames'\n",
+        "#video_to_frames(input_video, original_frame_folder)\n",
+        "\n",
+        "#processing frames\n",
+        "processed_frame_folder = '/content/ProcessedFrames'\n",
+        "process_frames(\"/content/Frames\", '/content/ProcessedFrames')\n",
+        "\n",
+        "#rebuilding mp4\n",
+        "output_video_path = '/content/output.mp4'\n",
+        "frame_rate = 2\n",
+        "frames_to_video(processed_frame_folder, output_video_path, frame_rate)\n"
+      ],
+      "metadata": {
+        "id": "XYHzH211qFgz",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "524b6f6c-23fc-4ab0-a53a-3dc2078cff73"
+      },
+      "execution_count": 175,
+      "outputs": [
+        {
+          "output_type": "stream",
+          "name": "stdout",
+          "text": [
+            "frame0000.jpg\n",
+            "Iteration 1: loss=183673.14\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0001.png to /content/ProcessedFrames\n",
+            "Iteration 2: loss=183373.14\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0001.png to /content/ProcessedFrames\n",
+            "Iteration 3: loss=183063.64\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0001.png to /content/ProcessedFrames\n",
+            "frame0001.jpg\n",
+            "Iteration 1: loss=183709.98\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0002.png to /content/ProcessedFrames\n",
+            "Iteration 2: loss=183413.11\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0002.png to /content/ProcessedFrames\n",
+            "Iteration 3: loss=183106.69\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0002.png to /content/ProcessedFrames\n",
+            "frame0002.jpg\n",
+            "Iteration 1: loss=183679.02\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0003.png to /content/ProcessedFrames\n",
+            "Iteration 2: loss=183382.16\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0003.png to /content/ProcessedFrames\n",
+            "Iteration 3: loss=183075.89\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0003.png to /content/ProcessedFrames\n",
+            "frame0003.jpg\n",
+            "Iteration 1: loss=183482.91\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0004.png to /content/ProcessedFrames\n",
+            "Iteration 2: loss=183190.67\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0004.png to /content/ProcessedFrames\n",
+            "Iteration 3: loss=182889.20\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0004.png to /content/ProcessedFrames\n",
+            "frame0004.jpg\n",
+            "Iteration 1: loss=183680.70\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0005.png to /content/ProcessedFrames\n",
+            "Iteration 2: loss=183388.34\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0005.png to /content/ProcessedFrames\n",
+            "Iteration 3: loss=183086.17\n",
+            "Saving /content/ProcessedFrames/ProcessedFrame-0005.png to /content/ProcessedFrames\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "SyxoJuv966xj"
+      },
+      "execution_count": 175,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "YfeV5SV43l3r"
+      },
+      "execution_count": 175,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "metadata": {
+        "id": "t438HS8IiX_Z"
+      },
+      "source": [
+        "### Wrapping up"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [],
+      "metadata": {
+        "id": "CbupZZtE2Od9"
+      },
+      "execution_count": 175,
+      "outputs": []
+    }
+  ],
+  "metadata": {
+    "colab": {
+      "provenance": [],
+      "include_colab_link": true
+    },
+    "kernelspec": {
+      "display_name": "Python 3",
+      "language": "python",
+      "name": "python3"
+    },
+    "language_info": {
+      "codemirror_mode": {
+        "name": "ipython",
+        "version": 3
+      },
+      "file_extension": ".py",
+      "mimetype": "text/x-python",
+      "name": "python",
+      "nbconvert_exporter": "python",
+      "pygments_lexer": "ipython3",
+      "version": "3.7.0"
+    }
+  },
+  "nbformat": 4,
+  "nbformat_minor": 0
+}
